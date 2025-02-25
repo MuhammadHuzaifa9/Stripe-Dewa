@@ -27,7 +27,7 @@ admin.initializeApp({
 const db = admin.firestore();
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY); // Use environment variable
-app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+app.post('/webhook', express.raw({ type: 'application/json'  }), async (req, res) => {
     const sig = req.headers['stripe-signature'];
     const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
