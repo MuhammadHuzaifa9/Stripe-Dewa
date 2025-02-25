@@ -27,7 +27,44 @@ admin.initializeApp({
 const db = admin.firestore();
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY); // Use environment variable
+app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+    const sig = req.headers['stripe-signature'];
+    const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+    let event;
+
+    try {
+        event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+    } catch (err) {
+        console.error('❌ Webhook Signature Verification Failed:', err.message);
+        return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    if (event.type === 'checkout.session.completed') {
+        const session = event.data.object;
+        const { userEmail, userName, productName } = session.metadata;
+        const amountPaid = session.amount_total / 100; // Convert cents to dollars
+
+        try {
+            await db.collection('orders').add({
+                userEmail,
+                userName,
+                productName,
+                amountPaid,
+                status: 'Paid',
+                createdAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+
+            console.log('✅ Order saved successfully in Firestore');
+        } catch (error) {
+            console.error('🔥 Error saving order to Firestore:', error);
+        }
+    }
+
+    res.json({ received: true });
+});
+
+// Vercel requires express.raw() middleware BEFORE express.json()
 // Middleware
 app.use(express.json());
 app.use(morgan('dev'));
@@ -79,50 +116,10 @@ app.post('/create-checkout-session', async (req, res) => {
 });
 
 // Webhook to Handle Payment Success
-app.post('/webhook', (req, res) => {
-    let event;
-    const sig = req.headers['stripe-signature'];
-    const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+// Webhook must be set BEFORE app.use(express.json()) to work properly
 
-    let rawBody = '';
 
-    req.on('data', (chunk) => {
-        rawBody += chunk;
-    });
 
-    req.on('end', async () => {
-        try {
-            event = stripe.webhooks.constructEvent(rawBody, sig, endpointSecret);
-        } catch (err) {
-            console.error('Webhook Error:', err.message);
-            return res.status(400).send(`Webhook Error: ${err.message}`);
-        }
-
-        if (event.type === 'checkout.session.completed') {
-            const session = event.data.object;
-            const userEmail = session.metadata.userEmail;
-            const userName = session.metadata.userName;
-            const productName = session.metadata.productName;
-            const amountPaid = session.amount_total / 100;
-
-            try {
-                await db.collection('orders').add({
-                    userEmail,
-                    userName,
-                    productName,
-                    amountPaid,
-                    status: 'Paid',
-                    createdAt: admin.firestore.FieldValue.serverTimestamp()
-                });
-                console.log('✅ Order saved successfully in Firestore');
-            } catch (error) {
-                console.error('🔥 Error saving order:', error);
-            }
-        }
-
-        res.json({ received: true });
-    });
-});
 
 // Set port dynamically for Vercel
 const port = process.env.PORT || 3000;
