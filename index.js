@@ -32,7 +32,6 @@ app.post('/webhook', express.raw({ type: 'application/json'  }), async (req, res
     const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
     let event;
-
     try {
         event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
     } catch (err) {
@@ -42,8 +41,8 @@ app.post('/webhook', express.raw({ type: 'application/json'  }), async (req, res
 
     if (event.type === 'checkout.session.completed') {
         const session = event.data.object;
-        const { userEmail, userName, productName } = session.metadata;
-        const amountPaid = session.amount_total / 100; // Convert cents to dollars
+        const { userEmail, userName, productName, address, phone } = session.metadata;
+        const amountPaid = session.amount_total / 100;
 
         try {
             await db.collection('orders').add({
@@ -51,11 +50,13 @@ app.post('/webhook', express.raw({ type: 'application/json'  }), async (req, res
                 userName,
                 productName,
                 amountPaid,
+                address,
+                phone,
                 status: 'Paid',
                 createdAt: admin.firestore.FieldValue.serverTimestamp()
             });
 
-            console.log('✅ Order saved successfully in Firestore');
+            console.log('✅ Order saved successfully in Firestore with Address and Phone');
         } catch (error) {
             console.error('🔥 Error saving order to Firestore:', error);
         }
@@ -85,9 +86,9 @@ app.use((req, res, next) => {
 // Stripe Checkout Session Endpoint
 app.post('/create-checkout-session', async (req, res) => {
     try {
-        const { productName, amount, userEmail, userName } = req.body;
+        const { productName, amount, userEmail, userName, address, phone } = req.body;
 
-        if (!productName || !amount || !userEmail || !userName) {
+        if (!productName || !amount || !userEmail || !userName || !address || !phone) {
             return res.status(400).json({ error: 'All fields are required' });
         }
 
@@ -105,7 +106,7 @@ app.post('/create-checkout-session', async (req, res) => {
             mode: 'payment',
             success_url: process.env.SUCCESS_URL,
             cancel_url: process.env.CANCEL_URL,
-            metadata: { userEmail, userName, productName }
+            metadata: { userEmail, userName, productName, address, phone }
         });
 
         res.json({ sessionId: session.id });
